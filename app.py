@@ -451,7 +451,7 @@ def render_customer_segmentation(customer_metrics):
             "Número de Clusters",
             min_value=2,
             max_value=10,
-            value=4,
+            value=optimization_results['recommended_k'],
             help="Selecciona el número de segmentos de clientes"
         )
     
