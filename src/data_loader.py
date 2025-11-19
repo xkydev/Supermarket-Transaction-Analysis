@@ -80,12 +80,14 @@ class DataLoader:
                 file_path,
                 delimiter='|',
                 header=None,
-                names=['product_id', 'category_id']
+                names=['product_id', 'category_id'],
+                dtype=str  # Cargar como string primero para verificar headers
             )
             
-            # Eliminar fila de cabecera si existe
-            if df.iloc[0]['product_id'] == 'v.Code_pr':
+            # Eliminar fila de cabecera si existe (buscar por texto común en headers)
+            if df.iloc[0]['product_id'].lower().startswith('v.code'):
                 df = df.iloc[1:].reset_index(drop=True)
+                logger.info("Header detectado y eliminado en ProductCategory.csv")
             
             # Convertir a tipos numéricos
             df['product_id'] = pd.to_numeric(df['product_id'], errors='coerce')

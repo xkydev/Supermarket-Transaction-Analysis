@@ -11,8 +11,6 @@ class Paths:
     """Configuración de rutas del proyecto."""
     DATA_RAW: Path = Path("data/raw")
     DATA_PROCESSED: Path = Path("data/processed")
-    MODELS: Path = Path("models")
-
 
 @dataclass
 class ClusteringConfig:

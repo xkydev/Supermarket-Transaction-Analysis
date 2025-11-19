@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 import logging
 from typing import Optional
+import shutil
 
 import streamlit as st
 import pandas as pd
@@ -176,21 +177,17 @@ def get_cached_product_recommendations(
 @st.cache_data
 def load_processed_data():
     """Carga los datos procesados desde CSV."""
-    try:
-        transactions = pd.read_csv(Paths.DATA_PROCESSED / 'transactions_expanded.csv')
-        customer_metrics = pd.read_csv(Paths.DATA_PROCESSED / 'customer_metrics.csv')
-        product_metrics = pd.read_csv(Paths.DATA_PROCESSED / 'product_metrics.csv')
-        transaction_metrics = pd.read_csv(Paths.DATA_PROCESSED / 'transaction_metrics.csv')
-        
-        # Convertir fechas
-        transactions['date'] = pd.to_datetime(transactions['date'])
-        transaction_metrics['date'] = pd.to_datetime(transaction_metrics['date'])
-        customer_metrics['last_purchase_date'] = pd.to_datetime(customer_metrics['last_purchase_date'])
-        
-        return transactions, customer_metrics, product_metrics, transaction_metrics
-    except FileNotFoundError:
-        st.error("⚠️ No se encontraron datos procesados. Ejecuta primero 'test_data_pipeline.py'")
-        st.stop()
+    transactions = pd.read_csv(Paths.DATA_PROCESSED / 'transactions_expanded.csv')
+    customer_metrics = pd.read_csv(Paths.DATA_PROCESSED / 'customer_metrics.csv')
+    product_metrics = pd.read_csv(Paths.DATA_PROCESSED / 'product_metrics.csv')
+    transaction_metrics = pd.read_csv(Paths.DATA_PROCESSED / 'transaction_metrics.csv')
+    
+    # Convertir fechas
+    transactions['date'] = pd.to_datetime(transactions['date'])
+    transaction_metrics['date'] = pd.to_datetime(transaction_metrics['date'])
+    customer_metrics['last_purchase_date'] = pd.to_datetime(customer_metrics['last_purchase_date'])
+    
+    return transactions, customer_metrics, product_metrics, transaction_metrics
 
 
 def render_sidebar_filters(transactions):
@@ -737,6 +734,764 @@ def render_customer_segmentation(customer_metrics):
         )
 
 
+def render_data_upload():
+    """Renderiza la página de Carga de Nuevos Datos."""
+    st.header("📤 Carga de Nuevos Datos")
+    
+    st.markdown("""
+    Esta funcionalidad permite cargar nuevos archivos de transacciones para actualizar el análisis.
+    Los datos se validarán automáticamente antes de ser procesados.
+    """)
+    
+    st.markdown("---")
+    
+    # Información sobre el formato esperado
+    with st.expander("ℹ️ Formato de Datos Esperado", expanded=False):
+        st.markdown("""
+        **Archivos soportados:**
+        
+        1. **Archivos de Transacciones** (formato: `XXX_Tran.csv`)
+           - Columnas requeridas: `date`, `store_id`, `customer_id`, `products`
+           - Formato de fecha: `YYYY-MM-DD` (ejemplo: 2013-01-01)
+           - Formato de productos: IDs separados por espacios (ejemplo: "20 3 1 5")
+           - El nombre del archivo debe indicar el ID de tienda (ejemplo: 102_Tran.csv)
+        
+        2. **Categories.csv** (opcional - para actualizar categorías)
+           - Columnas: `category_id`, `category_name`
+        
+        3. **ProductCategory.csv** (opcional - para actualizar relaciones)
+           - Columnas: `product_id`, `category_id`
+        
+        **Nota:** Los archivos se validarán antes de procesarse.
+        """)
+    
+    st.markdown("---")
+    
+    # Tabs para diferentes tipos de carga
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Cargar Transacciones", 
+        "🏷️ Cargar Categorías",
+        "🔗 Cargar Producto-Categoría",
+        "📈 Ver Estado Actual"
+    ])
+    
+    with tab1:
+        st.subheader("Cargar Nuevo Archivo de Transacciones")
+        
+        # File uploader
+        uploaded_file = st.file_uploader(
+            "Selecciona un archivo CSV",
+            type=['csv'],
+            help="Archivo de transacciones en formato XXX_Tran.csv"
+        )
+        
+        if uploaded_file is not None:
+            # Mostrar información del archivo
+            st.info(f"📁 Archivo: **{uploaded_file.name}** ({uploaded_file.size / 1024:.2f} KB)")
+            
+            try:
+                # Leer el archivo
+                import io
+                file_content = uploaded_file.getvalue().decode('utf-8')
+                
+                # Detectar delimitador
+                delimiter = ','
+                if '|' in file_content.split('\n')[0]:
+                    delimiter = '|'
+                
+                # Intentar leer con encabezados primero
+                uploaded_df = pd.read_csv(io.StringIO(file_content), sep=delimiter)
+                
+                # Validar estructura
+                st.markdown("### ✅ Paso 1: Validación de Estructura")
+                
+                required_columns = ['date', 'store_id', 'customer_id', 'products']
+                
+                # Detectar si el archivo no tiene encabezados (columnas numéricas 0, 1, 2, 3)
+                # o si tiene columnas pero no coinciden con las esperadas
+                if (uploaded_df.columns.tolist() == [0, 1, 2, 3] or 
+                    all(str(col).isdigit() for col in uploaded_df.columns) or
+                    not any(col in uploaded_df.columns for col in required_columns)):
+                    
+                    st.warning("⚠️ Archivo sin encabezados detectado. Asignando nombres de columnas...")
+                    
+                    # Verificar que tenga exactamente 4 columnas
+                    if len(uploaded_df.columns) != 4:
+                        st.error(f"❌ El archivo debe tener exactamente 4 columnas, pero tiene {len(uploaded_df.columns)}")
+                        st.info("Formato esperado: date, store_id, customer_id, products")
+                        st.stop()
+                    
+                    # Asignar nombres de columnas correctos
+                    uploaded_df.columns = required_columns
+                    st.success(f"✅ Nombres asignados automáticamente. Delimitador detectado: '{delimiter}'")
+                else:
+                    # Verificar columnas faltantes
+                    missing_columns = [col for col in required_columns if col not in uploaded_df.columns]
+                    
+                    if missing_columns:
+                        st.error(f"❌ Columnas faltantes: {', '.join(missing_columns)}")
+                        st.info(f"📋 Columnas encontradas: {', '.join(uploaded_df.columns.tolist())}")
+                        st.info(f"📋 Columnas requeridas: {', '.join(required_columns)}")
+                        st.stop()
+                    else:
+                        st.success("✅ Todas las columnas requeridas están presentes")
+                
+                # Mostrar preview
+                st.markdown("### 📋 Paso 2: Preview de Datos")
+                st.dataframe(uploaded_df.head(10), width='stretch')
+                
+                # Mostrar estadísticas básicas
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Filas", f"{len(uploaded_df):,}")
+                with col2:
+                    st.metric("Clientes Únicos", f"{uploaded_df['customer_id'].nunique():,}")
+                with col3:
+                    st.metric("Tiendas", f"{uploaded_df['store_id'].nunique()}")
+                with col4:
+                    # Contar productos únicos
+                    all_products = set()
+                    for products_str in uploaded_df['products'].dropna():
+                        all_products.update(products_str.split())
+                    st.metric("Productos Únicos", f"{len(all_products):,}")
+                
+                st.markdown("---")
+                
+                # Validaciones adicionales
+                st.markdown("### 🔍 Paso 3: Validaciones Adicionales")
+                
+                validations = []
+                
+                # Validar fechas
+                try:
+                    pd.to_datetime(uploaded_df['date'])
+                    validations.append(("Formato de fechas", True, "Fechas válidas"))
+                except:
+                    validations.append(("Formato de fechas", False, "Error en formato de fechas"))
+                
+                # Validar valores nulos
+                null_counts = uploaded_df[required_columns].isnull().sum()
+                has_nulls = null_counts.sum() > 0
+                validations.append((
+                    "Valores nulos",
+                    not has_nulls,
+                    "Sin valores nulos" if not has_nulls else f"Encontrados valores nulos: {null_counts[null_counts > 0].to_dict()}"
+                ))
+                
+                # Validar IDs positivos
+                positive_ids = (uploaded_df['customer_id'] > 0).all() and (uploaded_df['store_id'] > 0).all()
+                validations.append((
+                    "IDs válidos",
+                    positive_ids,
+                    "Todos los IDs son positivos" if positive_ids else "Algunos IDs son negativos o cero"
+                ))
+                
+                # Mostrar resultados de validación
+                for validation_name, is_valid, message in validations:
+                    if is_valid:
+                        st.success(f"✅ **{validation_name}**: {message}")
+                    else:
+                        st.error(f"❌ **{validation_name}**: {message}")
+                
+                all_valid = all(v[1] for v in validations)
+                
+                st.markdown("---")
+                
+                # Opciones de procesamiento
+                st.markdown("### ⚙️ Paso 4: Opciones de Procesamiento")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    process_mode = st.radio(
+                        "Modo de procesamiento:",
+                        ["Agregar a datos existentes", "Reemplazar datos existentes"],
+                        help="Agregar: añade a los datos actuales. Reemplazar: sobrescribe completamente."
+                    )
+                
+                with col2:
+                    recalculate_all = st.checkbox(
+                        "Recalcular todas las métricas",
+                        value=True,
+                        help="Recalcula customer_metrics, product_metrics, etc."
+                    )
+                
+                st.markdown("---")
+                
+                # Botón de procesamiento
+                if all_valid:
+                    if st.button("🚀 Procesar y Actualizar Datos", type="primary", use_container_width=True):
+                        with st.spinner("Procesando datos..."):
+                            try:
+                                # Crear progress bar
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+                                
+                                # Paso 1: Cargar datos existentes
+                                status_text.text("Cargando datos existentes...")
+                                progress_bar.progress(10)
+                                
+                                loader = DataLoader()
+                                processor = DataProcessor()
+                                
+                                # Paso 2: Procesar nuevo archivo
+                                status_text.text("Procesando nuevo archivo...")
+                                progress_bar.progress(30)
+                                
+                                # Expandir transacciones del nuevo archivo
+                                status_text.text("Expandiendo transacciones...")
+                                new_transactions = processor.expand_transactions(uploaded_df)
+                                
+                                progress_bar.progress(40)
+                                
+                                # Enriquecer con categorías
+                                status_text.text("Enriqueciendo con categorías...")
+                                product_category = loader.load_product_category()
+                                categories = loader.load_categories()
+                                new_transactions = processor.enrich_with_categories(
+                                    new_transactions, 
+                                    product_category, 
+                                    categories
+                                )
+                                
+                                progress_bar.progress(55)
+                                
+                                # Agregar features temporales
+                                status_text.text("Agregando features temporales...")
+                                new_transactions = processor.add_temporal_features(new_transactions)
+                                
+                                progress_bar.progress(70)
+                                
+                                # Combinar con datos existentes si es modo agregar
+                                if process_mode == "Agregar a datos existentes":
+                                    status_text.text("Combinando con datos existentes...")
+                                    existing_transactions = pd.read_csv(Paths.DATA_PROCESSED / 'transactions_expanded.csv')
+                                    combined_transactions = pd.concat([existing_transactions, new_transactions], ignore_index=True)
+                                else:
+                                    combined_transactions = new_transactions
+                                
+                                progress_bar.progress(80)
+                                
+                                # Guardar datos actualizados
+                                status_text.text("Guardando datos actualizados...")
+                                combined_transactions.to_csv(Paths.DATA_PROCESSED / 'transactions_expanded.csv', index=False)
+                                
+                                progress_bar.progress(90)
+                                
+                                # Recalcular métricas si se solicita
+                                if recalculate_all:
+                                    status_text.text("Recalculando métricas...")
+                                    
+                                    customer_metrics = processor.calculate_customer_metrics(combined_transactions)
+                                    customer_metrics.to_csv(Paths.DATA_PROCESSED / 'customer_metrics.csv', index=False)
+                                    
+                                    product_metrics = processor.calculate_product_metrics(combined_transactions)
+                                    product_metrics.to_csv(Paths.DATA_PROCESSED / 'product_metrics.csv', index=False)
+                                    
+                                    transaction_metrics = processor.calculate_transaction_metrics(combined_transactions)
+                                    transaction_metrics.to_csv(Paths.DATA_PROCESSED / 'transaction_metrics.csv', index=False)
+                                
+                                progress_bar.progress(100)
+                                status_text.text("✅ Procesamiento completado!")
+                                
+                                # Limpiar caché
+                                st.cache_data.clear()
+                                
+                                # Mostrar comparación antes/después
+                                st.markdown("---")
+                                st.markdown("### 📊 Resumen de Actualización")
+                                
+                                # Calcular deltas
+                                if process_mode == "Agregar a datos existentes":
+                                    col1, col2, col3 = st.columns(3)
+                                    
+                                    with col1:
+                                        new_rows = len(new_transactions)
+                                        st.metric(
+                                            "Transacciones Agregadas",
+                                            f"{new_rows:,}",
+                                            delta=f"+{new_rows:,}"
+                                        )
+                                    
+                                    with col2:
+                                        new_customers = new_transactions['customer_id'].nunique()
+                                        st.metric(
+                                            "Nuevos Clientes",
+                                            f"{new_customers:,}",
+                                            delta=f"+{new_customers:,}"
+                                        )
+                                    
+                                    with col3:
+                                        new_products = new_transactions['product_id'].nunique()
+                                        st.metric(
+                                            "Nuevos Productos",
+                                            f"{new_products:,}",
+                                            delta=f"+{new_products:,}"
+                                        )
+                                
+                                st.success("✅ Datos actualizados exitosamente. Recarga la página para ver los cambios.")
+                                
+                                # Botón para recargar
+                                if st.button("🔄 Recargar Aplicación"):
+                                    st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"❌ Error al procesar datos: {str(e)}")
+                                logger.error(f"Error en carga de datos: {e}", exc_info=True)
+                else:
+                    st.warning("⚠️ Por favor corrige los errores de validación antes de procesar.")
+                    
+            except Exception as e:
+                st.error(f"❌ Error al leer el archivo: {str(e)}")
+                logger.error(f"Error en lectura de archivo: {e}", exc_info=True)
+    
+    with tab2:
+        st.subheader("Cargar Archivo de Categorías")
+        
+        st.markdown("""
+        Sube un archivo `Categories.csv` para actualizar el catálogo de categorías.
+        
+        **Formato esperado:**
+        - `category_id`: ID numérico de la categoría
+        - `category_name`: Nombre descriptivo de la categoría
+        """)
+        
+        categories_file = st.file_uploader(
+            "Selecciona archivo Categories.csv",
+            type=['csv'],
+            key='categories_uploader',
+            help="Archivo con categorías de productos"
+        )
+        
+        if categories_file is not None:
+            st.info(f"📁 Archivo: **{categories_file.name}** ({categories_file.size / 1024:.2f} KB)")
+            
+            try:
+                import io
+                file_content = categories_file.getvalue().decode('utf-8')
+                
+                # Intentar detectar delimitador
+                delimiter = ','
+                if '|' in file_content.split('\n')[0]:
+                    delimiter = '|'
+                
+                # Intentar leer con encabezados primero
+                categories_df = pd.read_csv(io.StringIO(file_content), sep=delimiter)
+                
+                st.markdown("### ✅ Validación de Estructura")
+                
+                required_columns = ['category_id', 'category_name']
+                
+                # Detectar si no tiene encabezados
+                if (categories_df.columns.tolist() == [0, 1] or 
+                    all(str(col).isdigit() for col in categories_df.columns) or
+                    not any(col in categories_df.columns for col in required_columns)):
+                    
+                    st.warning("⚠️ Archivo sin encabezados detectado. Asignando nombres de columnas...")
+                    
+                    # Verificar que tenga exactamente 2 columnas
+                    if len(categories_df.columns) != 2:
+                        st.error(f"❌ El archivo debe tener exactamente 2 columnas, pero tiene {len(categories_df.columns)}")
+                        st.info("Formato esperado: category_id, category_name")
+                        st.stop()
+                    
+                    # Asignar nombres de columnas correctos
+                    categories_df.columns = required_columns
+                    st.success(f"✅ Nombres asignados automáticamente. Delimitador detectado: '{delimiter}'")
+                else:
+                    # Verificar columnas faltantes
+                    missing_columns = [col for col in required_columns if col not in categories_df.columns]
+                    
+                    if missing_columns:
+                        st.error(f"❌ Columnas faltantes: {', '.join(missing_columns)}")
+                        st.info(f"📋 Columnas requeridas: {', '.join(required_columns)}")
+                        st.stop()
+                
+                st.success("✅ Estructura válida")
+                
+                # Preview
+                st.markdown("### 📋 Preview de Datos")
+                st.dataframe(categories_df.head(20), width='stretch')
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Total Categorías", f"{len(categories_df):,}")
+                with col2:
+                    st.metric("Categorías Únicas", f"{categories_df['category_id'].nunique():,}")
+                
+                # Validaciones
+                st.markdown("### ✅ Validaciones")
+                validation_passed = True
+                
+                # 1. IDs duplicados
+                duplicates = categories_df['category_id'].duplicated().sum()
+                if duplicates > 0:
+                    st.error(f"❌ Se encontraron {duplicates} IDs de categoría duplicados")
+                    validation_passed = False
+                else:
+                    st.success("✅ No hay IDs duplicados")
+                
+                # 2. Valores nulos
+                nulls = categories_df.isnull().sum().sum()
+                if nulls > 0:
+                    st.error(f"❌ Se encontraron {nulls} valores nulos")
+                    validation_passed = False
+                else:
+                    st.success("✅ No hay valores nulos")
+                
+                # 3. IDs positivos
+                if (categories_df['category_id'] <= 0).any():
+                    st.error("❌ Algunos category_id no son positivos")
+                    validation_passed = False
+                else:
+                    st.success("✅ Todos los IDs son positivos")
+                
+                if validation_passed:
+                    st.markdown("---")
+                    
+                    # Modo de actualización
+                    update_mode = st.radio(
+                        "Modo de actualización",
+                        ["Agregar nuevas categorías", "Reemplazar todas las categorías"],
+                        help="Agregar: combina con categorías existentes. Reemplazar: elimina las actuales."
+                    )
+                    
+                    if st.button("🚀 Procesar Categorías", type="primary"):
+                        with st.spinner("Procesando..."):
+                            try:
+                                if update_mode == "Agregar nuevas categorías":
+                                    # Cargar categorías existentes
+                                    existing_categories = pd.read_csv(Paths.DATA_RAW / 'Categories.csv')
+                                    
+                                    # Combinar (las nuevas sobrescriben las existentes con mismo ID)
+                                    combined_categories = pd.concat([existing_categories, categories_df])
+                                    combined_categories = combined_categories.drop_duplicates(
+                                        subset=['category_id'], 
+                                        keep='last'
+                                    ).sort_values('category_id')
+                                else:
+                                    combined_categories = categories_df.sort_values('category_id')
+                                
+                                # Guardar
+                                combined_categories.to_csv(Paths.DATA_RAW / 'Categories.csv', index=False)
+                                
+                                st.success("✅ Categorías actualizadas exitosamente!")
+                                st.info(f"📊 Total de categorías: {len(combined_categories):,}")
+                                
+                                # Mostrar cambios
+                                if update_mode == "Agregar nuevas categorías":
+                                    new_count = len(combined_categories) - len(existing_categories)
+                                    if new_count > 0:
+                                        st.success(f"➕ {new_count} nuevas categorías agregadas")
+                                    updated_count = len(categories_df) - new_count
+                                    if updated_count > 0:
+                                        st.info(f"🔄 {updated_count} categorías actualizadas")
+                                
+                                st.warning("⚠️ **Importante:** Debes reprocesar las transacciones para que los cambios se reflejen en el sistema.")
+                                
+                                if st.button("🔄 Recargar Aplicación"):
+                                    st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"❌ Error al procesar: {str(e)}")
+                                logger.error(f"Error en carga de categorías: {e}", exc_info=True)
+                else:
+                    st.warning("⚠️ Por favor corrige los errores de validación.")
+                    
+            except Exception as e:
+                st.error(f"❌ Error al leer el archivo: {str(e)}")
+                logger.error(f"Error en lectura de categorías: {e}", exc_info=True)
+    
+    with tab3:
+        st.subheader("Cargar Archivo de Producto-Categoría")
+        
+        st.markdown("""
+        Sube un archivo `ProductCategory.csv` para actualizar las relaciones producto-categoría.
+        
+        **Formato esperado:**
+        - `product_id`: ID numérico del producto
+        - `category_id`: ID numérico de la categoría
+        """)
+        
+        product_category_file = st.file_uploader(
+            "Selecciona archivo ProductCategory.csv",
+            type=['csv'],
+            key='product_category_uploader',
+            help="Archivo con relaciones producto-categoría"
+        )
+        
+        if product_category_file is not None:
+            st.info(f"📁 Archivo: **{product_category_file.name}** ({product_category_file.size / 1024:.2f} KB)")
+            
+            try:
+                import io
+                file_content = product_category_file.getvalue().decode('utf-8')
+                
+                # Intentar detectar delimitador
+                delimiter = ','
+                if '|' in file_content.split('\n')[0]:
+                    delimiter = '|'
+                
+                # Intentar leer con encabezados primero
+                product_category_df = pd.read_csv(io.StringIO(file_content), sep=delimiter)
+                
+                st.markdown("### ✅ Validación de Estructura")
+                
+                required_columns = ['product_id', 'category_id']
+                
+                # Detectar si no tiene encabezados
+                if (product_category_df.columns.tolist() == [0, 1] or 
+                    all(str(col).isdigit() for col in product_category_df.columns) or
+                    not any(col in product_category_df.columns for col in required_columns)):
+                    
+                    st.warning("⚠️ Archivo sin encabezados detectado. Asignando nombres de columnas...")
+                    
+                    # Verificar que tenga exactamente 2 columnas
+                    if len(product_category_df.columns) != 2:
+                        st.error(f"❌ El archivo debe tener exactamente 2 columnas, pero tiene {len(product_category_df.columns)}")
+                        st.info("Formato esperado: product_id, category_id")
+                        st.stop()
+                    
+                    # Asignar nombres de columnas correctos
+                    product_category_df.columns = required_columns
+                    st.success(f"✅ Nombres asignados automáticamente. Delimitador detectado: '{delimiter}'")
+                else:
+                    # Verificar columnas faltantes
+                    missing_columns = [col for col in required_columns if col not in product_category_df.columns]
+                    
+                    if missing_columns:
+                        st.error(f"❌ Columnas faltantes: {', '.join(missing_columns)}")
+                        st.info(f"📋 Columnas requeridas: {', '.join(required_columns)}")
+                        st.stop()
+                
+                st.success("✅ Estructura válida")
+                
+                # Preview
+                st.markdown("### 📋 Preview de Datos")
+                st.dataframe(product_category_df.head(20), width='stretch')
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Total Relaciones", f"{len(product_category_df):,}")
+                with col2:
+                    st.metric("Productos Únicos", f"{product_category_df['product_id'].nunique():,}")
+                
+                # Validaciones
+                st.markdown("### ✅ Validaciones")
+                validation_passed = True
+                
+                # 1. IDs duplicados
+                duplicates = product_category_df['product_id'].duplicated().sum()
+                if duplicates > 0:
+                    st.warning(f"⚠️ Se encontraron {duplicates} product_id duplicados (se mantendrá la última asignación)")
+                
+                # 2. Valores nulos
+                nulls = product_category_df.isnull().sum().sum()
+                if nulls > 0:
+                    st.error(f"❌ Se encontraron {nulls} valores nulos")
+                    validation_passed = False
+                else:
+                    st.success("✅ No hay valores nulos")
+                
+                # 3. IDs positivos
+                if (product_category_df['product_id'] <= 0).any() or (product_category_df['category_id'] <= 0).any():
+                    st.error("❌ Algunos IDs no son positivos")
+                    validation_passed = False
+                else:
+                    st.success("✅ Todos los IDs son positivos")
+                
+                # 4. Verificar categorías existentes
+                try:
+                    # Leer categorías existentes (formato con pipe y sin encabezados)
+                    existing_categories = pd.read_csv(
+                        Paths.DATA_RAW / 'Categories.csv', 
+                        sep='|', 
+                        header=None, 
+                        names=['category_id', 'category_name']
+                    )
+                    
+                    unknown_categories = set(product_category_df['category_id']) - set(existing_categories['category_id'])
+                    if unknown_categories:
+                        st.warning(f"⚠️ {len(unknown_categories)} categorías no existen en Categories.csv: {sorted(list(unknown_categories)[:10])}")
+                        st.info("💡 Considera subir primero el archivo de categorías actualizado")
+                    else:
+                        st.success("✅ Todas las categorías existen")
+                except Exception as e:
+                    st.warning(f"⚠️ No se pudo verificar categorías: {str(e)}")
+                
+                if validation_passed:
+                    st.markdown("---")
+                    
+                    # Modo de actualización
+                    update_mode = st.radio(
+                        "Modo de actualización",
+                        ["Agregar/Actualizar productos", "Reemplazar todas las relaciones"],
+                        help="Agregar: combina con productos existentes. Reemplazar: elimina las actuales."
+                    )
+                    
+                    if st.button("🚀 Procesar Producto-Categoría", type="primary"):
+                        with st.spinner("Procesando..."):
+                            try:
+                                if update_mode == "Agregar/Actualizar productos":
+                                    # Cargar relaciones existentes
+                                    existing_pc = pd.read_csv(Paths.DATA_RAW / 'ProductCategory.csv')
+                                    
+                                    # Combinar (las nuevas sobrescriben las existentes con mismo product_id)
+                                    combined_pc = pd.concat([existing_pc, product_category_df])
+                                    combined_pc = combined_pc.drop_duplicates(
+                                        subset=['product_id'], 
+                                        keep='last'
+                                    ).sort_values('product_id')
+                                else:
+                                    combined_pc = product_category_df.sort_values('product_id')
+                                
+                                # Guardar
+                                combined_pc.to_csv(Paths.DATA_RAW / 'ProductCategory.csv', index=False)
+                                
+                                st.success("✅ Relaciones producto-categoría actualizadas exitosamente!")
+                                st.info(f"📊 Total de productos: {len(combined_pc):,}")
+                                
+                                # Mostrar cambios
+                                if update_mode == "Agregar/Actualizar productos":
+                                    new_count = len(combined_pc) - len(existing_pc)
+                                    if new_count > 0:
+                                        st.success(f"➕ {new_count} nuevos productos agregados")
+                                    updated_count = len(product_category_df) - new_count
+                                    if updated_count > 0:
+                                        st.info(f"🔄 {updated_count} productos actualizados")
+                                
+                                st.warning("⚠️ **Importante:** Debes reprocesar las transacciones para que los cambios se reflejen en el sistema.")
+                                
+                                if st.button("🔄 Recargar Aplicación"):
+                                    st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"❌ Error al procesar: {str(e)}")
+                                logger.error(f"Error en carga de producto-categoría: {e}", exc_info=True)
+                else:
+                    st.warning("⚠️ Por favor corrige los errores de validación.")
+                    
+            except Exception as e:
+                st.error(f"❌ Error al leer el archivo: {str(e)}")
+                logger.error(f"Error en lectura de producto-categoría: {e}", exc_info=True)
+    
+    with tab4:
+        st.subheader("Estado Actual de los Datos")
+        
+        try:
+            # Cargar datos actuales
+            transactions_current = pd.read_csv(Paths.DATA_PROCESSED / 'transactions_expanded.csv')
+            
+            st.markdown("### 📊 Resumen de Datos Actuales")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Transacciones", f"{len(transactions_current):,}")
+            
+            with col2:
+                st.metric("Clientes Únicos", f"{transactions_current['customer_id'].nunique():,}")
+            
+            with col3:
+                st.metric("Productos Únicos", f"{transactions_current['product_id'].nunique():,}")
+            
+            with col4:
+                st.metric("Tiendas", f"{transactions_current['store_id'].nunique()}")
+            
+            st.markdown("---")
+            
+            # Información de fechas
+            transactions_current['date'] = pd.to_datetime(transactions_current['date'])
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Fecha Mínima", transactions_current['date'].min().strftime('%Y-%m-%d'))
+            
+            with col2:
+                st.metric("Fecha Máxima", transactions_current['date'].max().strftime('%Y-%m-%d'))
+            
+            with col3:
+                days_span = (transactions_current['date'].max() - transactions_current['date'].min()).days
+                st.metric("Días de Datos", f"{days_span:,}")
+            
+            st.markdown("---")
+            
+            # Tamaño de archivos
+            st.markdown("### 💾 Almacenamiento")
+            
+            processed_files = {
+                'transactions_expanded.csv': 'Transacciones Expandidas',
+                'customer_metrics.csv': 'Métricas de Clientes',
+                'product_metrics.csv': 'Métricas de Productos',
+                'transaction_metrics.csv': 'Métricas de Transacciones'
+            }
+            
+            file_sizes = []
+            for filename, description in processed_files.items():
+                file_path = Paths.DATA_PROCESSED / filename
+                if file_path.exists():
+                    size_mb = file_path.stat().st_size / (1024 * 1024)
+                    file_sizes.append({
+                        'Archivo': description,
+                        'Tamaño (MB)': f"{size_mb:.2f}"
+                    })
+            
+            if file_sizes:
+                st.dataframe(pd.DataFrame(file_sizes), width='stretch', hide_index=True)
+            
+            st.markdown("---")
+            
+            # Botones de acción
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🗑️ Limpiar Caché de la Aplicación", use_container_width=True):
+                    st.cache_data.clear()
+                    st.success("✅ Caché limpiado exitosamente")
+            
+            with col2:
+                if st.button("🔄 Resetear a Datos Originales", type="primary", use_container_width=True):
+                    with st.spinner("⏳ Restaurando y procesando datos originales..."):
+                        try:
+                            # Eliminar archivos procesados
+                            processed_dir = Paths.DATA_PROCESSED
+                            
+                            if processed_dir.exists():
+                                shutil.rmtree(processed_dir)
+                            processed_dir.mkdir(parents=True)
+                            
+                            # Ejecutar pipeline de procesamiento
+                            loader = DataLoader()
+                            processor = DataProcessor()
+                            
+                            # Cargar datos raw
+                            transactions_raw = loader.load_transactions()
+                            categories = loader.load_categories()
+                            product_category = loader.load_product_category()
+                            
+                            # Procesar todos los datos usando process_all
+                            processed_data = processor.process_all(transactions_raw, product_category, categories)
+                            
+                            # Guardar datos procesados
+                            processed_data['transactions_expanded'].to_csv(Paths.DATA_PROCESSED / 'transactions_expanded.csv', index=False)
+                            processed_data['customer_metrics'].to_csv(Paths.DATA_PROCESSED / 'customer_metrics.csv', index=False)
+                            processed_data['product_metrics'].to_csv(Paths.DATA_PROCESSED / 'product_metrics.csv', index=False)
+                            processed_data['transaction_metrics'].to_csv(Paths.DATA_PROCESSED / 'transaction_metrics.csv', index=False)
+                            
+                            # Limpiar caché
+                            st.cache_data.clear()
+                            
+                            st.success("✅ Datos reseteados y procesados correctamente!")
+                            st.info("💡 Recarga la aplicación con F5 para ver los cambios")
+                            
+                        except Exception as e:
+                            st.error(f"❌ Error al resetear datos: {str(e)}")
+                            logger.error(f"Error en reseteo de datos: {e}", exc_info=True)
+        
+        except FileNotFoundError:
+            st.warning("⚠️ No se encontraron datos procesados. Carga algunos datos primero.")
+
+
 def render_recommendations(transactions):
     """Renderiza la página de Sistema de Recomendación."""
     st.header("🎯 Sistema de Recomendación")
@@ -1118,11 +1873,45 @@ def main():
     
     st.title("🛒 Análisis de Transacciones de Supermercado")
     
-    # Cargar datos
-    with st.spinner("Cargando datos..."):
-        transactions, customer_metrics, product_metrics, transaction_metrics = load_processed_data()
+    # Verificar si existen datos procesados
+    data_exists = (Paths.DATA_PROCESSED / 'transactions_expanded.csv').exists()
     
-    # Sidebar con navegación y filtros
+    # Si no existen datos procesados, generarlos automáticamente
+    if not data_exists:
+        st.info("🔄 Primera ejecución detectada. Procesando datos iniciales...")
+        
+        with st.spinner("⏳ Cargando y procesando datos originales... Esto puede tomar unos minutos."):
+            try:
+                # Crear directorio si no existe
+                Paths.DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
+                
+                # Ejecutar pipeline de procesamiento
+                loader = DataLoader()
+                processor = DataProcessor()
+                
+                # Cargar datos raw
+                transactions_raw = loader.load_transactions()
+                categories = loader.load_categories()
+                product_category = loader.load_product_category()
+                
+                # Procesar todos los datos usando process_all
+                processed_data = processor.process_all(transactions_raw, product_category, categories)
+                
+                # Guardar datos procesados
+                processed_data['transactions_expanded'].to_csv(Paths.DATA_PROCESSED / 'transactions_expanded.csv', index=False)
+                processed_data['customer_metrics'].to_csv(Paths.DATA_PROCESSED / 'customer_metrics.csv', index=False)
+                processed_data['product_metrics'].to_csv(Paths.DATA_PROCESSED / 'product_metrics.csv', index=False)
+                processed_data['transaction_metrics'].to_csv(Paths.DATA_PROCESSED / 'transaction_metrics.csv', index=False)
+                
+                st.success("✅ Datos procesados correctamente!")
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"❌ Error al procesar datos iniciales: {str(e)}")
+                logger.error(f"Error en procesamiento inicial: {e}", exc_info=True)
+                st.stop()
+    
+    # Sidebar con navegación
     st.sidebar.title("Navegación")
     page = st.sidebar.radio(
         "Selecciona una página:",
@@ -1136,6 +1925,10 @@ def main():
             "Carga de Nuevos Datos"
         ]
     )
+    
+    # Cargar datos procesados
+    with st.spinner("Cargando datos..."):
+        transactions, customer_metrics, product_metrics, transaction_metrics = load_processed_data()
     
     st.sidebar.markdown("---")
     
@@ -1165,9 +1958,8 @@ def main():
     elif page == "Sistema de Recomendación":
         render_recommendations(transactions)
     
-    else:
-        st.info(f"⚠️ Página **{page}** en desarrollo")
-        st.write("Esta funcionalidad se implementará próximamente.")
+    elif page == "Carga de Nuevos Datos":
+        render_data_upload()
 
 
 if __name__ == "__main__":
