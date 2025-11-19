@@ -8,6 +8,8 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 
+from config import Paths
+
 logger = logging.getLogger(__name__)
 
 

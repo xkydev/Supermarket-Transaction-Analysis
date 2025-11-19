@@ -7,10 +7,11 @@ import sys
 from pathlib import Path
 
 # Agregar el directorio raíz al path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data_loader import DataLoader
 from src.data_processor import DataProcessor
+from config import Paths
 
 # Configurar logging
 logging.basicConfig(
@@ -84,7 +85,7 @@ def main():
         
         # 5. Guardar datos procesados
         logger.info("\n5. GUARDANDO DATOS PROCESADOS...")
-        output_path = Path("data/processed")
+        output_path = Paths.DATA_PROCESSED
         output_path.mkdir(parents=True, exist_ok=True)
         
         processed_data['transactions_expanded'].to_csv(

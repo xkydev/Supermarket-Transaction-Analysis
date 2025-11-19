@@ -9,9 +9,10 @@ from pathlib import Path
 import pandas as pd
 
 # Agregar el directorio raíz al path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.clustering import CustomerSegmentation
+from config import Paths, ClusteringConfig
 
 # Configurar logging
 logging.basicConfig(
@@ -31,7 +32,7 @@ def main():
     try:
         # Cargar datos de clientes
         logger.info("\n1. CARGANDO DATOS DE CLIENTES...")
-        customer_metrics = pd.read_csv('data/processed/customer_metrics.csv')
+        customer_metrics = pd.read_csv(Paths.DATA_PROCESSED / 'customer_metrics.csv')
         logger.info(f"  Clientes cargados: {len(customer_metrics):,}")
         
         # Inicializar segmentador
@@ -43,7 +44,7 @@ def main():
         
         # Encontrar K óptimo
         logger.info("\n3. ENCONTRANDO K ÓPTIMO...")
-        optimization = segmenter.find_optimal_k(X_scaled, min_k=2, max_k=8)
+        optimization = segmenter.find_optimal_k(X_scaled, min_k=ClusteringConfig.MIN_CLUSTERS, max_k=ClusteringConfig.MAX_CLUSTERS)
         logger.info(f"  K óptimo recomendado: {optimization['recommended_k']}")
         logger.info(f"  Silhouette scores: {[f'{s:.3f}' for s in optimization['silhouette_scores']]}")
         
@@ -79,7 +80,7 @@ def main():
         fig_3d = segmenter.plot_clusters_3d(X_reduced_3d, labels, cluster_names)
         
         # Guardar visualizaciones
-        output_path = Path("data/processed/visualizations")
+        output_path = Paths.DATA_PROCESSED / "visualizations"
         output_path.mkdir(parents=True, exist_ok=True)
         
         fig_elbow.write_html(output_path / "clustering_elbow.html")
@@ -97,7 +98,7 @@ def main():
         )
         
         customer_segments.to_csv(
-            'data/processed/customer_segments.csv',
+            Paths.DATA_PROCESSED / 'customer_segments.csv',
             index=False
         )
         profile.to_csv(

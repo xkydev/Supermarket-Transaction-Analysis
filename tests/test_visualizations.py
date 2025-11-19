@@ -9,10 +9,11 @@ from pathlib import Path
 import pandas as pd
 
 # Agregar el directorio raíz al path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.metrics import MetricsCalculator
 from src.visualizations import Visualizer
+from config import Paths
 
 # Configurar logging
 logging.basicConfig(
@@ -32,9 +33,9 @@ def main():
     try:
         # Cargar datos procesados
         logger.info("\n1. CARGANDO DATOS PROCESADOS...")
-        transactions = pd.read_csv('data/processed/transactions_expanded.csv')
-        customer_metrics = pd.read_csv('data/processed/customer_metrics.csv')
-        product_metrics = pd.read_csv('data/processed/product_metrics.csv')
+        transactions = pd.read_csv(Paths.DATA_PROCESSED / 'transactions_expanded.csv')
+        customer_metrics = pd.read_csv(Paths.DATA_PROCESSED / 'customer_metrics.csv')
+        product_metrics = pd.read_csv(Paths.DATA_PROCESSED / 'product_metrics.csv')
         
         # Convertir fecha a datetime
         transactions['date'] = pd.to_datetime(transactions['date'])
@@ -103,7 +104,7 @@ def main():
         
         # Guardar visualizaciones como HTML
         logger.info("\n4. GUARDANDO VISUALIZACIONES...")
-        output_path = Path("data/processed/visualizations")
+        output_path = Paths.DATA_PROCESSED / "visualizations"
         output_path.mkdir(parents=True, exist_ok=True)
         
         fig1.write_html(output_path / "top_products.html")

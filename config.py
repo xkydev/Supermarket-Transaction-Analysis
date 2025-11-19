@@ -18,7 +18,7 @@ class Paths:
 class ClusteringConfig:
     """Configuración para el análisis de clustering."""
     MIN_CLUSTERS: int = 2
-    MAX_CLUSTERS: int = 10
+    MAX_CLUSTERS: int = 8
     RANDOM_STATE: int = 42
     N_INIT: int = 10
 
@@ -27,9 +27,10 @@ class ClusteringConfig:
 class RecommenderConfig:
     """Configuración para el sistema de recomendación."""
     TOP_N: int = 10
-    MIN_SUPPORT: float = 0.01
-    MIN_CONFIDENCE: float = 0.3
+    MIN_SUPPORT: float = 0.02
+    MIN_CONFIDENCE: float = 0.4
     MIN_LIFT: float = 1.0
+    MAX_TRANSACTIONS: int = 100000  # Usar None para procesar todas las transacciones
 
 
 @dataclass
